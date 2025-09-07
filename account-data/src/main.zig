@@ -3,9 +3,9 @@ const sol_lib = @import("solana_program_library");
 const std = @import("std");
 const Rent = sol.Rent;
 
-pub const ProgramError = error{ InvalidInstructionData, InvalidAccountData };
+pub const ProgramError = error{ InvalidInstructionData, InvalidAccountData, Unexpected };
 
-pub const AddressInfo = packed struct {
+pub const AddressInfo = struct {
     name: [32]u8,
     house_number: u8,
     street: [64]u8,
@@ -13,7 +13,7 @@ pub const AddressInfo = packed struct {
 
     pub const SIZE = @sizeOf(AddressInfo);
 
-    fn new(name: [32]u8, house_number: u8, street: [64]u8, city: [32]u8) AddressInfo {
+    pub fn new(name: [32]u8, house_number: u8, street: [64]u8, city: [32]u8) AddressInfo {
         return AddressInfo{ .name = name, .house_number = house_number, .street = street, .city = city };
     }
 };
@@ -24,28 +24,42 @@ export fn entrypoint(input: [*]u8) u64 {
     return 0;
 }
 
-fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) !ProgramError {
+fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
     _ = program_id;
 
     if (data.len < AddressInfo.SIZE) return ProgramError.InvalidInstructionData;
     if (accounts.len < 3) return ProgramError.InvalidAccountData;
 
-    const address_info: AddressInfo = std.mem.bytesToValue(AddressInfo, data[0..AddressInfo.SIZE]) catch return ProgramError.InvalidInstructionData;
+    const address_info: AddressInfo = std.mem.bytesToValue(AddressInfo, data[0..AddressInfo.SIZE]);
 
     const address_info_account = accounts[0];
     const payer = accounts[1];
     const system_program = accounts[2];
 
-    if (address_info_account.data.len != 0) return ProgramError.InvalidAccountData;
-    if (!payer.isSigner) return ProgramError.InvalidAccountData;
-    if (system_program.id != sol_lib.system.id) return ProgramError.InvalidAccountData;
+    if (address_info_account.dataLen() != 0) return ProgramError.InvalidAccountData;
+    if (!payer.isSigner()) return ProgramError.InvalidAccountData;
+    if (!sol.PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAccountData;
 
     const space = AddressInfo.SIZE;
-    const lamports = (try Rent.get()).getMinimumBalance(space);
+    const rent = try Rent.get();
+    const lamports = rent.getMinimumBalance(space);
 
-    sol_lib.system.createAccount(payer, address_info_account, lamports, space, system_program);
+    sol_lib.system.createAccount(.{
+        .from = payer.info(),
+        .to = address_info_account.info(),
+        .lamports = lamports,
+        .space = space,
+        .owner_id = system_program.id(),
+    }) catch |e| return switch (e) {
+        error.InvalidInstructionData => error.InvalidInstructionData,
+        error.InvalidAccountData => error.InvalidAccountData,
+        else => error.Unexpected,
+    };
 
-    if (address_info_account.data.len != space) return ProgramError.InvalidAccountData;
+    const bytes = std.mem.asBytes(&address_info);
 
-    std.mem.copy(u8, address_info_account.data, std.mem.asBytes(&address_info));
+    if (address_info_account.dataLen() < bytes.len)
+        return error.InvalidAccountData;
+
+    @memcpy(address_info_account.data()[0..bytes.len], bytes);
 }
