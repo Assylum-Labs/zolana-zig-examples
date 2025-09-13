@@ -25,8 +25,6 @@ export fn entrypoint(input: [*]u8) u64 {
 }
 
 fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
-    _ = program_id;
-
     if (data.len < AddressInfo.SIZE) return ProgramError.InvalidInstructionData;
     if (accounts.len < 3) return ProgramError.InvalidAccountData;
 
@@ -49,7 +47,7 @@ fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data:
         .to = address_info_account.info(),
         .lamports = lamports,
         .space = space,
-        .owner_id = system_program.id(),
+        .owner_id = program_id.*,
     }) catch |e| return switch (e) {
         error.InvalidInstructionData => error.InvalidInstructionData,
         error.InvalidAccountData => error.InvalidAccountData,

@@ -18,6 +18,10 @@ pub fn build(b: *std.Build) !void {
     _ = solana.buildProgram(b, program, target, optimize);
     b.installArtifact(program);
 
+    // Install binary to program-test/tests/fixtures
+    const install_step = b.addInstallArtifact(program, .{ .dest_dir = .{ .override = .{ .custom = "../program-test/tests/fixtures/" } } });
+    b.getInstallStep().dependOn(&install_step.step);
+
     // Optional: generate a keypair for the program
     base58.generateProgramKeypair(b, program);
 }
