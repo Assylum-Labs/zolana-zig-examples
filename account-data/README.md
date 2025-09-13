@@ -17,7 +17,7 @@ There is also a helper script which will install it to the current directory:
 
 ```console
 zig fetch --save https://github.com/joncinque/solana-program-library-zig/archive/refs/tags/v0.15.1.tar.gz
-zig fetch --save https://github.com/joncinque/solana-program-sdk-zig/archive/refs/tags/v0.16.3.tar.gz
+zig fetch --save https://github.com/joncinque/solana-program-sdk-zig/archive/refs/tags/v0.16.2.tar.gz
 zig fetch --save https://github.com/joncinque/base58-zig/archive/refs/tags/v0.14.0.tar.gz
 ```
 
