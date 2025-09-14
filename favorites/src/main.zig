@@ -3,92 +3,101 @@ const sol_lib = @import("solana_program_library");
 const std = @import("std");
 const Rent = sol.Rent;
 
-pub fn entrypoint(input: [*]u8) u64 {
+export fn entrypoint(input: [*]u8) u64 {
     var context = sol.Context.load(input) catch return 1;
 
-    processInstruction(context.programId, context.accounts[0..context.num_accounts], context.data) catch |err| return @intFromError(err);
+    processInstruction(context.program_id, context.accounts[0..context.num_accounts], context.data) catch |err| return @intFromError(err);
 
     return 0;
 }
 
-pub const ProgramError = error{ InvalidIxData, InvalidAcctdata, Unexpected };
+pub const ProgramError = error{ InvalidIxData, InvalidAcctData, Unexpected };
 
-pub const Favorites = packed struct { number: u64, color: [32]u8, hobbies: [4][32]u8 };
+pub const Favorites = struct { number: u64, color: [32]u8, hobbies: [4][32]u8 };
 
 pub const InstructionType = enum(u8) { create, get };
 
-pub const CreateData = packed struct { favorites: Favorites };
-
-pub fn processInstruction(program_id: *sol.Publickey, accounts: []sol.Account, data: []const u8) void!ProgramError {
+pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
     const instruction_type: *const InstructionType = @ptrCast(data);
 
     switch (instruction_type.*) {
         InstructionType.create => {
-            const create_data: *align(1) const CreateData = @ptrCast(data[1..]);
+            const create_data: *align(1) const Favorites = @ptrCast(data[1..]);
 
-            try create_pda_ix(program_id, accounts, create_data);
+            try create_pda_ix(program_id, accounts, create_data.*);
         },
         InstructionType.get => {
             try get_pda_ix(program_id, accounts);
-            sol.log("get ix");
         },
     }
 }
 
-pub fn create_pda_ix(program_id: *sol.Publickey, accounts: []sol.Account, data: Favorites) void!ProgramError {
-    if (accounts.len() == 3) return ProgramError.InvalidAcctdata;
+pub fn create_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account, data: Favorites) ProgramError!void {
+    if (!(accounts.len == 3)) return ProgramError.InvalidAcctData;
 
     const user = accounts[0];
     const favtorites_account = accounts[1];
     const system_program = accounts[2];
 
-    if (!user.isSigner()) return ProgramError.InvalidAccountData;
-    if (favtorites_account.dataLen() != 0) return ProgramError.InvalidAccountData;
-    if (!sol.PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAccountData;
+    if (!user.isSigner()) return ProgramError.InvalidAcctData;
+    if (favtorites_account.dataLen() != 0) return ProgramError.InvalidAcctData;
+    if (!sol.PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAcctData;
 
-    const seeds = &[_][]const u8{ "favorites", user.id[0..] };
+    const seeds = &[_][]const u8{ "favorites", &user.id().bytes };
 
-    const favorites_pda, const favorites_bump = sol.Publickey.findProgramAddress(seeds, program_id);
+    const pda_result = try sol.PublicKey.findProgramAddress(seeds, program_id.*);
+    const favorites_pda = pda_result.address;
+    const favorites_bump = pda_result.bump_seed[0];
 
-    const signer_seeds = &[_][]const u8{
-        "favorites",
-        user.id[0..],
-        &[_]u8{favorites_bump},
+    const signer_seeds = [_][]const []const u8{
+        &[_][]const u8{
+            "favorites",
+            &user.id().bytes,
+            &[_]u8{favorites_bump},
+        },
     };
 
-    if (favorites_pda != favtorites_account.key) return ProgramError.InvalidAcctdata;
+    if (!sol.PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
 
     if (favtorites_account.dataLen() == 0) {
         const space = @sizeOf(Favorites);
         const rent = try Rent.get();
         const lamports = rent.getMinimumBalance(space);
 
-        sol_lib.system.createAccount(.{ .from = user.info(), .to = favtorites_account.info(), .lamports = lamports, .space = space, .owner_id = program_id, .seeds = signer_seeds }) catch |e| return switch (e) {
+        sol_lib.system.createAccount(.{ .from = user.info(), .to = favtorites_account.info(), .lamports = lamports, .space = space, .owner_id = program_id.*, .seeds = signer_seeds[0..] }) catch |e| return switch (e) {
             error.InvalidIxData => error.InvalidIxData,
-            error.InvalidAcctdata => error.InvalidAcctdata,
-            error.Unexpected => error.Unexpected,
+            error.InvalidAcctData => error.InvalidAcctData,
+            else => error.Unexpected,
         };
 
         const bytes = std.mem.asBytes(&data);
-        @memcpy(favtorites_account.data()[0..bytes], bytes);
-    } else return ProgramError.InvalidAcctdata;
+        @memcpy(favtorites_account.data()[0..bytes.len], bytes);
+    } else return ProgramError.InvalidAcctData;
 }
 
-pub fn get_pda_ix(program_id: *sol.Publickey, accounts: []sol.Account) void!ProgramError {
-    if (accounts.len() == 2) return ProgramError.InvalidAcctdata;
+pub fn get_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramError!void {
+    if (!(accounts.len == 2)) return ProgramError.InvalidAcctData;
 
     const user = accounts[0];
     const favtorites_account = accounts[1];
 
-    if (!user.isSigner()) return ProgramError.InvalidAccountData;
-    if (favtorites_account.dataLen() != 0) return ProgramError.InvalidAccountData;
+    if (!user.isSigner()) return ProgramError.InvalidAcctData;
 
-    const seeds = &[_][]const u8{ "favorites", user.id[0..] };
-    const favorites_pda, _ = sol.Publickey.findProgramAddress(seeds, program_id);
+    if (favtorites_account.dataLen() == 0) return ProgramError.InvalidAcctData;
 
-    if (favorites_pda != favtorites_account.key) return ProgramError.InvalidAcctdata;
+    const seeds = &[_][]const u8{ "favorites", &user.id().bytes };
+    const pda_result = try sol.PublicKey.findProgramAddress(seeds, program_id.*);
+    const favorites_pda = pda_result.address;
 
-    const favorites = std.mem.bytesToValue(Favorites.favtorites_account.data());
+    if (!sol.PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
 
-    sol.print("User {}'s favorite number is {}, favorite color is: {}, and their hobbies are {:#?}", user.id(), favorites.number, favorites.color, favorites.hobbies);
+    const favorites = std.mem.bytesToValue(Favorites, favtorites_account.data());
+
+    const color_str = std.mem.sliceTo(favorites.color[0..], 0);
+    var hobby_strs: [4][]const u8 = undefined;
+    for (favorites.hobbies, 0..) |hobby, i| {
+        hobby_strs[i] = std.mem.sliceTo(&hobby, 0);
+    }
+
+    sol.print("User {}'s favorite number is {}, favorite color is: {s}, and their hobbies are {s}, {s}, {s}, {s}", .{ user.id(), favorites.number, color_str, hobby_strs[0], hobby_strs[1], hobby_strs[2], hobby_strs[3] });
 }
