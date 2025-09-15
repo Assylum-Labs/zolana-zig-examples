@@ -94,7 +94,7 @@ fn test() {
     };
 
     let _data = svm.get_account(&favourites_account).unwrap().data;
-    println!("{:?}", _data);
+    // println!("{:?}", _data);
     // dbg!(Favorites::try_from(&data).unwrap());
 
     let accounts = vec![

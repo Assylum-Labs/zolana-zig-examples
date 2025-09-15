@@ -91,12 +91,14 @@ pub fn get_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
 
     if (!sol.PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
 
-    const favorites = std.mem.bytesToValue(Favorites, favtorites_account.data());
+    const favorites_bytes = favtorites_account.data()[0..@sizeOf(Favorites)];
+    var favorites: Favorites = undefined;
+    @memcpy(std.mem.asBytes(&favorites), favorites_bytes);
 
     const color_str = std.mem.sliceTo(favorites.color[0..], 0);
     var hobby_strs: [4][]const u8 = undefined;
-    for (favorites.hobbies, 0..) |hobby, i| {
-        hobby_strs[i] = std.mem.sliceTo(&hobby, 0);
+    for (0..4) |i| {
+        hobby_strs[i] = std.mem.sliceTo(favorites.hobbies[i][0..], 0);
     }
 
     sol.print("User {}'s favorite number is {}, favorite color is: {s}, and their hobbies are {s}, {s}, {s}, {s}", .{ user.id(), favorites.number, color_str, hobby_strs[0], hobby_strs[1], hobby_strs[2], hobby_strs[3] });
