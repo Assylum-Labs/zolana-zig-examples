@@ -35,6 +35,31 @@ impl Favorites {
 
         favaorites
     }
+
+    pub fn deserialize(bytes: &[u8]) -> (u64, &str, Vec<&str>) {
+        let number = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+
+        let color = std::str::from_utf8(bytes[8..40].try_into().unwrap())
+            .unwrap()
+            .trim_end_matches('\0');
+
+        let hobbies = vec![
+            std::str::from_utf8(bytes[40..72].try_into().unwrap())
+                .unwrap()
+                .trim_end_matches('\0'),
+            std::str::from_utf8(bytes[72..104].try_into().unwrap())
+                .unwrap()
+                .trim_end_matches('\0'),
+            std::str::from_utf8(bytes[104..136].try_into().unwrap())
+                .unwrap()
+                .trim_end_matches('\0'),
+            std::str::from_utf8(bytes[136..168].try_into().unwrap())
+                .unwrap()
+                .trim_end_matches('\0'),
+        ];
+
+        (number, color, hobbies)
+    }
 }
 
 #[test]
@@ -93,9 +118,9 @@ fn test() {
         }
     };
 
-    let _data = svm.get_account(&favourites_account).unwrap().data;
-    // println!("{:?}", _data);
-    // dbg!(Favorites::try_from(&data).unwrap());
+    let data = svm.get_account(&favourites_account).unwrap().data;
+    // println!("{:?}", data);
+    // println!("{:?}", Favorites::deserialize(&data));
 
     let accounts = vec![
         AccountMeta::new(user_keypair.pubkey(), true),
