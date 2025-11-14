@@ -119,8 +119,8 @@ fn test() {
     };
 
     let data = svm.get_account(&favourites_account).unwrap().data;
-    // println!("{:?}", data);
-    // println!("{:?}", Favorites::deserialize(&data));
+    println!("{:?}", data);
+    println!("{:?}", Favorites::deserialize(&data));
 
     let accounts = vec![
         AccountMeta::new(user_keypair.pubkey(), true),

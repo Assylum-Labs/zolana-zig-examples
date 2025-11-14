@@ -26,5 +26,5 @@ zig fetch --save https://github.com/joncinque/base58-zig/archive/refs/tags/v0.14
 You can build the program by running:
 
 ```console
-./solana-zig/zig build
+../solana-zig/zig build
 ```
