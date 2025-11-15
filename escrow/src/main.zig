@@ -11,7 +11,7 @@ export fn entrypoint(input: [*]u8) u64 {
     return 0;
 }
 
-pub const ProgramError = error{ InvalidIxData, InvalidAcctData, Unexpected };
+pub const ProgramError = error{ InvalidIxData, InvalidAcctData, PublicKeyMismatch, Unexpected };
 
 pub const MakeOffer = struct { id: u64, token_a_offered_amount: u64, token_b_wanted_amount: u64 };
 
@@ -29,7 +29,7 @@ pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, d
             try make_offer(program_id, accounts, make_data.*);
         },
         InstructionType.take => {
-            try take_offer(program_id, accounts, data);
+            try take_offer(program_id, accounts);
         },
     }
 }
@@ -67,7 +67,7 @@ pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: Mak
 
     if (!sol.PublicKey.equals(offer_info.id(), offer_id)) return ProgramError.InvalidAcctData;
 
-    const expected_vault_pda = try sol_lib.associated_token_account.getAssociatedTokenAccountAddressAndBumpSeed(offer_info.id(), maker_token_account_a.id(), token_program.id());
+    const expected_vault_pda = try sol_lib.associated_token_account.getAssociatedTokenAccountAddressAndBumpSeed(offer_info.id(), token_mint_a.id(), token_program.id());
 
     const expected_vault_pda_address = expected_vault_pda.address;
 
@@ -116,7 +116,7 @@ pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: Mak
     @memcpy(offer_info.data()[0..bytes.len], bytes);
 }
 
-pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
+pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramError!void {
     if (!(accounts.len == 10)) return ProgramError.InvalidAcctData;
 
     const offer_info = accounts[0];
@@ -138,4 +138,100 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: []c
     const offer_bytes = offer_info.data()[0..@sizeOf(Offer)];
     var offer: Offer = undefined;
     @memcpy(std.mem.asBytes(&offer), offer_bytes);
+
+    if (!sol.PublicKey.equals(offer.maker, maker.id())) return ProgramError.PublicKeyMismatch;
+    if (!sol.PublicKey.equals(offer.token_mint_a, token_mint_a.id())) return ProgramError.PublicKeyMismatch;
+    if (!sol.PublicKey.equals(offer.token_mint_b, token_mint_b.id())) return ProgramError.PublicKeyMismatch;
+
+    const signer_seeds = [_][]const []const u8{
+        &[_][]const u8{
+            "offer",
+            &maker.id().bytes,
+            std.mem.asBytes(&offer.id),
+            &[_]u8{offer.bump},
+        },
+    };
+
+    const offer_key = sol.PublicKey.createProgramAddress(
+        &.{
+            "offer",
+            &maker.id().bytes,
+            std.mem.asBytes(&offer.id),
+            &[_]u8{offer.bump},
+        },
+        program_id.*,
+    ) catch |e| return switch (e) {
+        else => error.Unexpected,
+    };
+
+    if (!sol.PublicKey.equals(offer_key, offer_info.id())) return ProgramError.PublicKeyMismatch;
+
+    try assert_ata(maker_token_account_b.id(), maker.id(), token_mint_b.id());
+
+    try assert_ata(taker_token_account_a.id(), taker.id(), token_mint_a.id());
+
+    if (taker_token_account_a.lamports().* == 0) {
+        // TODO; improve error handling
+        sol_lib.associated_token_account.createAccount(.{
+            .funder = payer.info(),
+            .account = taker_token_account_a.info(),
+            .owner = taker.info(),
+            .mint = token_mint_a.info(),
+            .system_program = system_program.info(),
+            .token_program = token_program.info(),
+            .rent = rent_info.info(),
+        }) catch return error.Unexpected;
+    }
+
+    if (maker_token_account_b.lamports().* == 0) {
+        sol_lib.associated_token_account.createAccount(.{
+            .funder = payer.info(),
+            .account = maker_token_account_b.info(),
+            .owner = maker.info(),
+            .mint = token_mint_b.info(),
+            .system_program = system_program.info(),
+            .token_program = token_program.info(),
+            .rent = rent_info.info(),
+        }) catch return error.Unexpected;
+    }
+
+    const vault_amount_a = (sol_lib.token.Account.decode(vault.data()) catch return error.Unexpected).amount;
+
+    const taker_amount_a_before_transfer = (sol_lib.token.Account.decode(taker_token_account_a.data()) catch return error.Unexpected).amount;
+
+    sol_lib.token.transfer(.{
+        .from = taker_token_account_b.info(),
+        .to = maker_token_account_b.info(),
+        .amount = offer.token_b_wanted_amount,
+        .authority = .{ .single = taker.info() },
+    }) catch return error.Unexpected;
+
+    sol_lib.token.transfer(.{ .from = vault.info(), .to = taker_token_account_a.info(), .amount = vault_amount_a, .authority = .{ .multiple = &[_]sol.Account.Info{
+        offer_info.info(),
+        taker.info(),
+    } }, .seeds = signer_seeds[0..] }) catch return error.Unexpected;
+
+    const taker_amount_a = (sol_lib.token.Account.decode(taker_token_account_a.data()) catch return error.Unexpected).amount;
+
+    const maker_amount_b = (sol_lib.token.Account.decode(maker_token_account_b.data()) catch return error.Unexpected).amount;
+
+    if (taker_amount_a != taker_amount_a_before_transfer + vault_amount_a) return ProgramError.InvalidAcctData;
+
+    if (maker_amount_b != taker_amount_a_before_transfer + offer.token_b_wanted_amount) return ProgramError.InvalidAcctData;
+
+    sol_lib.token.closeAccount(.{ .account = vault.info(), .account_to_receive_remaining_tokens = taker.info(), .owner = offer_info.info(), .seeds = signer_seeds[0..] }) catch return error.Unexpected;
+
+    const lamports = offer_info.lamports().*;
+    offer_info.lamports().* -= lamports;
+    payer.lamports().* += lamports;
+
+    offer_info.realloc(0) catch return error.Unexpected;
+
+    offer_info.assign(system_program.id());
+}
+
+pub fn assert_ata(ata: sol.PublicKey, owner: sol.PublicKey, mint: sol.PublicKey) ProgramError!void {
+    const expected_pda = try sol_lib.associated_token_account.getAssociatedTokenAccountAddressAndBumpSeed(owner, mint, sol_lib.token.id);
+    const expected_pda_address = expected_pda.address;
+    if (!sol.PublicKey.equals(expected_pda_address, ata)) return ProgramError.InvalidAcctData;
 }
