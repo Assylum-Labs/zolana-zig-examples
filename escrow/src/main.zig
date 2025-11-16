@@ -1,10 +1,12 @@
 const sol = @import("solana_program_sdk");
 const sol_lib = @import("solana_program_library");
 const std = @import("std");
-const Rent = sol.Rent;
+const Rent = sol.rent.Rent;
+const PublicKey = sol.public_key.PublicKey;
+const Account = sol.account.Account;
 
 export fn entrypoint(input: [*]u8) u64 {
-    var context = sol.Context.load(input) catch return 1;
+    var context = sol.context.Context.load(input) catch return 1;
 
     processInstruction(context.program_id, context.accounts[0..context.num_accounts], context.data) catch |err| return @intFromError(err);
 
@@ -15,11 +17,11 @@ pub const ProgramError = error{ InvalidIxData, InvalidAcctData, PublicKeyMismatc
 
 pub const MakeOffer = struct { id: u64, token_a_offered_amount: u64, token_b_wanted_amount: u64 };
 
-pub const Offer = struct { id: u64, maker: sol.PublicKey, token_mint_a: sol.PublicKey, token_mint_b: sol.PublicKey, token_b_wanted_amount: u64, bump: u8 };
+pub const Offer = struct { id: u64, maker: PublicKey, token_mint_a: PublicKey, token_mint_b: PublicKey, token_b_wanted_amount: u64, bump: u8 };
 
 pub const InstructionType = enum(u8) { make, take };
 
-pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
+pub fn processInstruction(program_id: *PublicKey, accounts: []Account, data: []const u8) ProgramError!void {
     const instruction_type: *const InstructionType = @ptrCast(data);
 
     switch (instruction_type.*) {
@@ -34,7 +36,7 @@ pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, d
     }
 }
 
-pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: MakeOffer) ProgramError!void {
+pub fn make_offer(program_id: *PublicKey, accounts: []Account, data: MakeOffer) ProgramError!void {
     if (!(accounts.len == 10)) return ProgramError.InvalidAcctData;
 
     const offer_info = accounts[0];
@@ -52,7 +54,7 @@ pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: Mak
 
     const offer_seeds = &[_][]const u8{ "offer", &maker.id().bytes, std.mem.asBytes(&data.id) };
 
-    const offer_pda = try sol.PublicKey.findProgramAddress(offer_seeds, program_id.*);
+    const offer_pda = try PublicKey.findProgramAddress(offer_seeds, program_id.*);
     const offer_id = offer_pda.address;
     const offer_bump = offer_pda.bump_seed[0];
 
@@ -65,18 +67,18 @@ pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: Mak
         },
     };
 
-    if (!sol.PublicKey.equals(offer_info.id(), offer_id)) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(offer_info.id(), offer_id)) return ProgramError.InvalidAcctData;
 
     const expected_vault_pda = try sol_lib.associated_token_account.getAssociatedTokenAccountAddressAndBumpSeed(offer_info.id(), token_mint_a.id(), token_program.id());
 
     const expected_vault_pda_address = expected_vault_pda.address;
 
-    if (!sol.PublicKey.equals(expected_vault_pda_address, vault.id())) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(expected_vault_pda_address, vault.id())) return ProgramError.InvalidAcctData;
 
     const offer = Offer{ .bump = offer_bump, .maker = maker.id(), .id = data.id, .token_mint_a = token_mint_a.id(), .token_mint_b = token_mint_b.id(), .token_b_wanted_amount = data.token_b_wanted_amount };
 
     const size = @sizeOf(Offer);
-    const rent = try sol.Rent.get();
+    const rent = try Rent.get();
     const lamports_required = rent.getMinimumBalance(size);
 
     sol_lib.system.createAccount(.{ .from = payer.info(), .to = offer_info.info(), .lamports = lamports_required, .space = size, .owner_id = program_id.*, .seeds = signer_seeds[0..] }) catch |e| return switch (e) {
@@ -116,7 +118,7 @@ pub fn make_offer(program_id: *sol.PublicKey, accounts: []sol.Account, data: Mak
     @memcpy(offer_info.data()[0..bytes.len], bytes);
 }
 
-pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramError!void {
+pub fn take_offer(program_id: *PublicKey, accounts: []Account) ProgramError!void {
     if (!(accounts.len == 10)) return ProgramError.InvalidAcctData;
 
     const offer_info = accounts[0];
@@ -139,9 +141,9 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
     var offer: Offer = undefined;
     @memcpy(std.mem.asBytes(&offer), offer_bytes);
 
-    if (!sol.PublicKey.equals(offer.maker, maker.id())) return ProgramError.PublicKeyMismatch;
-    if (!sol.PublicKey.equals(offer.token_mint_a, token_mint_a.id())) return ProgramError.PublicKeyMismatch;
-    if (!sol.PublicKey.equals(offer.token_mint_b, token_mint_b.id())) return ProgramError.PublicKeyMismatch;
+    if (!PublicKey.equals(offer.maker, maker.id())) return ProgramError.PublicKeyMismatch;
+    if (!PublicKey.equals(offer.token_mint_a, token_mint_a.id())) return ProgramError.PublicKeyMismatch;
+    if (!PublicKey.equals(offer.token_mint_b, token_mint_b.id())) return ProgramError.PublicKeyMismatch;
 
     const signer_seeds = [_][]const []const u8{
         &[_][]const u8{
@@ -152,7 +154,7 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
         },
     };
 
-    const offer_key = sol.PublicKey.createProgramAddress(
+    const offer_key = PublicKey.createProgramAddress(
         &.{
             "offer",
             &maker.id().bytes,
@@ -164,7 +166,7 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
         else => error.Unexpected,
     };
 
-    if (!sol.PublicKey.equals(offer_key, offer_info.id())) return ProgramError.PublicKeyMismatch;
+    if (!PublicKey.equals(offer_key, offer_info.id())) return ProgramError.PublicKeyMismatch;
 
     try assert_ata(maker_token_account_b.id(), maker.id(), token_mint_b.id());
 
@@ -206,7 +208,7 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
         .authority = .{ .single = taker.info() },
     }) catch return error.Unexpected;
 
-    sol_lib.token.transfer(.{ .from = vault.info(), .to = taker_token_account_a.info(), .amount = vault_amount_a, .authority = .{ .multiple = &[_]sol.Account.Info{
+    sol_lib.token.transfer(.{ .from = vault.info(), .to = taker_token_account_a.info(), .amount = vault_amount_a, .authority = .{ .multiple = &[_]Account.Info{
         offer_info.info(),
         taker.info(),
     } }, .seeds = signer_seeds[0..] }) catch return error.Unexpected;
@@ -230,8 +232,8 @@ pub fn take_offer(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
     offer_info.assign(system_program.id());
 }
 
-pub fn assert_ata(ata: sol.PublicKey, owner: sol.PublicKey, mint: sol.PublicKey) ProgramError!void {
+pub fn assert_ata(ata: PublicKey, owner: PublicKey, mint: PublicKey) ProgramError!void {
     const expected_pda = try sol_lib.associated_token_account.getAssociatedTokenAccountAddressAndBumpSeed(owner, mint, sol_lib.token.id);
     const expected_pda_address = expected_pda.address;
-    if (!sol.PublicKey.equals(expected_pda_address, ata)) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(expected_pda_address, ata)) return ProgramError.InvalidAcctData;
 }
