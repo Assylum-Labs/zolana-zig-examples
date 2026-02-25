@@ -11,7 +11,11 @@ pub fn build(b: *std.Build) !void {
     const solana_lib_dep = b.dependency("solana_program_library", dep_opts);
     const solana_lib_mod = solana_lib_dep.module("solana_program_library");
 
-    const program = b.addSharedLibrary(.{ .name = "account_data_program", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+    const program = b.addLibrary(.{ .name = "account_data_program", .linkage = .dynamic, .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .optimize = optimize,
+        .target = target,
+    }) });
 
     program.root_module.addImport("solana_program_library", solana_lib_mod);
 

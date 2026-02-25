@@ -1,7 +1,9 @@
 const sol = @import("solana_program_sdk");
 const sol_lib = @import("solana_program_library");
 const std = @import("std");
-const Rent = sol.Rent;
+const Rent = sol.rent.Rent;
+const PublicKey = sol.public_key.PublicKey;
+const Account = sol.account.Account;
 
 pub const ProgramError = error{ InvalidInstructionData, InvalidAccountData, Unexpected };
 
@@ -19,12 +21,12 @@ pub const AddressInfo = struct {
 };
 
 export fn entrypoint(input: [*]u8) u64 {
-    var context = sol.Context.load(input) catch return 1;
+    var context = sol.context.Context.load(input) catch return 1;
     processInstruction(context.program_id, context.accounts[0..context.num_accounts], context.data) catch |err| return @intFromError(err);
     return 0;
 }
 
-fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
+fn processInstruction(program_id: *PublicKey, accounts: []Account, data: []const u8) ProgramError!void {
     if (data.len < AddressInfo.SIZE) return ProgramError.InvalidInstructionData;
     if (accounts.len < 3) return ProgramError.InvalidAccountData;
 
@@ -36,7 +38,7 @@ fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data:
 
     if (address_info_account.dataLen() != 0) return ProgramError.InvalidAccountData;
     if (!payer.isSigner()) return ProgramError.InvalidAccountData;
-    if (!sol.PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAccountData;
+    if (!PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAccountData;
 
     const space = AddressInfo.SIZE;
     const rent = try Rent.get();

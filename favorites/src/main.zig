@@ -1,10 +1,13 @@
 const sol = @import("solana_program_sdk");
 const sol_lib = @import("solana_program_library");
 const std = @import("std");
-const Rent = sol.Rent;
+const PublicKey = sol.public_key.PublicKey;
+const Account = sol.account.Account;
+const Rent = sol.rent.Rent;
+const Context = sol.context.Context;
 
 export fn entrypoint(input: [*]u8) u64 {
-    var context = sol.Context.load(input) catch return 1;
+    var context = Context.load(input) catch return 1;
 
     processInstruction(context.program_id, context.accounts[0..context.num_accounts], context.data) catch |err| return @intFromError(err);
 
@@ -17,7 +20,7 @@ pub const Favorites = struct { number: u64, color: [32]u8, hobbies: [4][32]u8 };
 
 pub const InstructionType = enum(u8) { create, get };
 
-pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, data: []const u8) ProgramError!void {
+pub fn processInstruction(program_id: *PublicKey, accounts: []Account, data: []const u8) ProgramError!void {
     const instruction_type: *const InstructionType = @ptrCast(data);
 
     switch (instruction_type.*) {
@@ -32,7 +35,7 @@ pub fn processInstruction(program_id: *sol.PublicKey, accounts: []sol.Account, d
     }
 }
 
-pub fn create_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account, data: Favorites) ProgramError!void {
+pub fn create_pda_ix(program_id: *PublicKey, accounts: []Account, data: Favorites) ProgramError!void {
     if (!(accounts.len == 3)) return ProgramError.InvalidAcctData;
 
     const user = accounts[0];
@@ -41,11 +44,11 @@ pub fn create_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account, data: 
 
     if (!user.isSigner()) return ProgramError.InvalidAcctData;
     if (favtorites_account.dataLen() != 0) return ProgramError.InvalidAcctData;
-    if (!sol.PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(system_program.id(), sol_lib.system.id)) return ProgramError.InvalidAcctData;
 
     const seeds = &[_][]const u8{ "favorites", &user.id().bytes };
 
-    const pda_result = try sol.PublicKey.findProgramAddress(seeds, program_id.*);
+    const pda_result = try PublicKey.findProgramAddress(seeds, program_id.*);
     const favorites_pda = pda_result.address;
     const favorites_bump = pda_result.bump_seed[0];
 
@@ -57,7 +60,7 @@ pub fn create_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account, data: 
         },
     };
 
-    if (!sol.PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
 
     if (favtorites_account.dataLen() == 0) {
         const space = @sizeOf(Favorites);
@@ -75,7 +78,7 @@ pub fn create_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account, data: 
     } else return ProgramError.InvalidAcctData;
 }
 
-pub fn get_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramError!void {
+pub fn get_pda_ix(program_id: *PublicKey, accounts: []Account) ProgramError!void {
     if (!(accounts.len == 2)) return ProgramError.InvalidAcctData;
 
     const user = accounts[0];
@@ -86,10 +89,10 @@ pub fn get_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
     if (favtorites_account.dataLen() == 0) return ProgramError.InvalidAcctData;
 
     const seeds = &[_][]const u8{ "favorites", &user.id().bytes };
-    const pda_result = try sol.PublicKey.findProgramAddress(seeds, program_id.*);
+    const pda_result = try PublicKey.findProgramAddress(seeds, program_id.*);
     const favorites_pda = pda_result.address;
 
-    if (!sol.PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
+    if (!PublicKey.equals(favorites_pda, favtorites_account.id())) return ProgramError.InvalidAcctData;
 
     const favorites_bytes = favtorites_account.data()[0..@sizeOf(Favorites)];
     var favorites: Favorites = undefined;
@@ -101,5 +104,5 @@ pub fn get_pda_ix(program_id: *sol.PublicKey, accounts: []sol.Account) ProgramEr
         hobby_strs[i] = std.mem.sliceTo(favorites.hobbies[i][0..], 0);
     }
 
-    sol.print("User {}'s favorite number is {}, favorite color is: {s}, and their hobbies are {s}, {s}, {s}, {s}", .{ user.id(), favorites.number, color_str, hobby_strs[0], hobby_strs[1], hobby_strs[2], hobby_strs[3] });
+    sol.log.print("User {f}'s favorite number is {}, favorite color is: {s}, and their hobbies are {s}, {s}, {s}, {s}", .{ user.id(), favorites.number, color_str, hobby_strs[0], hobby_strs[1], hobby_strs[2], hobby_strs[3] });
 }
